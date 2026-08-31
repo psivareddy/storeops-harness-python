@@ -1,0 +1,144 @@
+; ============================================================================
+; StoreOps dependency contracts — the automated half of the harness hard gates.
+;
+; This file is the "depcruiser or equivalent dependency analyser" required by
+; capstone PDF section 3.5. Run via: lint-imports
+;
+; Gate traceability:
+;   HG-1 (Failure Mode 1) -> the five "no-cross-module-repository" contracts
+;   HG-5 (Failure Mode 1, 4) -> routes-never-import-repositories + module-layers
+;   HG-6 (Failure Mode 1, 4) -> reports-reads-only-via-services
+;   Shared-infrastructure boundary -> shared-is-infrastructure-only
+;
+; NOTE (Phase 0): the module paths below are declared before app/ is populated.
+; `lint-imports` will report unresolved modules until Phase 1 creates them; the
+; contracts activate as soon as the StoreOps baseline exists.
+; ============================================================================
+
+[importlinter]
+root_packages =
+    app
+include_external_packages = False
+
+; ---------------------------------------------------------------------------
+; HG-1 / Failure Mode 1 — no module may import another module's repository.
+; Cross-module reads must go through the target module's SERVICE layer.
+; One contract per source module so a violation names the offending module
+; directly in the Evaluator's feedback rather than in an aggregate.
+; ---------------------------------------------------------------------------
+[importlinter:contract:activities-no-cross-module-repository]
+name = activities must not import a sibling module's repository
+type = forbidden
+source_modules =
+    app.activities
+forbidden_modules =
+    app.programmes.repository
+    app.staff.repository
+    app.alerts.repository
+    app.reports.repository
+
+[importlinter:contract:programmes-no-cross-module-repository]
+name = programmes must not import a sibling module's repository
+type = forbidden
+source_modules =
+    app.programmes
+forbidden_modules =
+    app.activities.repository
+    app.staff.repository
+    app.alerts.repository
+    app.reports.repository
+
+[importlinter:contract:staff-no-cross-module-repository]
+name = staff must not import a sibling module's repository
+type = forbidden
+source_modules =
+    app.staff
+forbidden_modules =
+    app.activities.repository
+    app.programmes.repository
+    app.alerts.repository
+    app.reports.repository
+
+[importlinter:contract:alerts-no-cross-module-repository]
+name = alerts must not import a sibling module's repository
+type = forbidden
+source_modules =
+    app.alerts
+forbidden_modules =
+    app.activities.repository
+    app.programmes.repository
+    app.staff.repository
+    app.reports.repository
+
+; HG-6 / Failure Mode 1, 4 — reports is read-only. It aggregates by calling
+; sibling SERVICES; it must never touch a sibling repository, which would make
+; it a second source of truth for task state.
+[importlinter:contract:reports-reads-only-via-services]
+name = reports must aggregate via sibling services, never sibling repositories
+type = forbidden
+source_modules =
+    app.reports
+forbidden_modules =
+    app.activities.repository
+    app.programmes.repository
+    app.staff.repository
+    app.alerts.repository
+
+; ---------------------------------------------------------------------------
+; HG-5 / Failure Mode 1, 4 — no layer skipping. A route validates and delegates
+; to its service; it must never reach a repository directly, including its own.
+; Business logic in a route is untestable below HTTP and cannot be reused by an
+; event handler.
+; ---------------------------------------------------------------------------
+[importlinter:contract:routes-never-import-repositories]
+name = routes must never import any repository (no layer skipping)
+type = forbidden
+source_modules =
+    app.activities.routes
+    app.programmes.routes
+    app.staff.routes
+    app.alerts.routes
+    app.reports.routes
+forbidden_modules =
+    app.activities.repository
+    app.programmes.repository
+    app.staff.repository
+    app.alerts.repository
+    app.reports.repository
+
+; ---------------------------------------------------------------------------
+; Layer ordering within every module: a repository must not call a service and
+; a service must not import routes. Enforces PDF section 3.5's "repositories
+; must not call external services".
+; ---------------------------------------------------------------------------
+[importlinter:contract:module-layers]
+name = Routes -> Service -> Repository ordering inside every StoreOps module
+type = layers
+layers =
+    routes
+    service
+    repository
+containers =
+    app.activities
+    app.programmes
+    app.staff
+    app.alerts
+    app.reports
+
+; ---------------------------------------------------------------------------
+; app/shared/ is technical infrastructure (error contract, event bus, audit
+; sink, logging, config). It must NOT become a sixth business module: it may
+; never import a domain module, or the dependency direction inverts and the
+; event bus starts to know about the domains it decouples.
+; ---------------------------------------------------------------------------
+[importlinter:contract:shared-is-infrastructure-only]
+name = app.shared must not depend on any business module
+type = forbidden
+source_modules =
+    app.shared
+forbidden_modules =
+    app.activities
+    app.programmes
+    app.staff
+    app.alerts
+    app.reports

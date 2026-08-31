@@ -1,0 +1,44 @@
+# --- Python ---
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Tooling caches ---
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Environment / secrets (never commit) ---
+.env
+.env.*
+!.env.example
+
+# --- Harness working state ---
+# .harness/output/ holds in-flight run state (spec.md, sprint-N-contract.md,
+# generator-summary.md, evaluator-feedback.md, escalation.md). It is scratch space
+# for an active run and is deliberately NOT version-controlled.
+.harness/output/*
+!.harness/output/.gitkeep
+
+# --- Harness governance audit trail: MUST be committed ---
+# Capstone PDF section 7 designates .harness/reviews/ the permanent quality and
+# observability record. The explicit negations below guarantee that no broader
+# ignore rule above (or added later) can silently exclude it.
+!.harness/reviews/
+!.harness/reviews/**
+
+# --- OS / editor noise ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.idea/
+*.swp
