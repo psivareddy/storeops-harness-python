@@ -10,9 +10,14 @@
 ;   HG-6 (Failure Mode 1, 4) -> reports-reads-only-via-services
 ;   Shared-infrastructure boundary -> shared-is-infrastructure-only
 ;
-; NOTE (Phase 0): the module paths below are declared before app/ is populated.
-; `lint-imports` will report unresolved modules until Phase 1 creates them; the
-; contracts activate as soon as the StoreOps baseline exists.
+; Every `forbidden` contract sets `allow_indirect_imports = True`, i.e. it checks
+; DIRECT imports only. This matches PDF section 3.5's wording -- "no module may
+; import *directly* from another module's repository" -- and it is required for
+; correctness, not just fidelity: without it, the legitimate chain
+;   staff.routes -> staff.service -> staff.repository
+; is reported as a violation, because a route transitively reaches a repository
+; through exactly the layering the architecture mandates. Checking transitively
+; would forbid the correct design and make the gate unpassable.
 ; ============================================================================
 
 [importlinter]
@@ -29,6 +34,7 @@ include_external_packages = False
 [importlinter:contract:activities-no-cross-module-repository]
 name = activities must not import a sibling module's repository
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.activities
 forbidden_modules =
@@ -40,6 +46,7 @@ forbidden_modules =
 [importlinter:contract:programmes-no-cross-module-repository]
 name = programmes must not import a sibling module's repository
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.programmes
 forbidden_modules =
@@ -51,6 +58,7 @@ forbidden_modules =
 [importlinter:contract:staff-no-cross-module-repository]
 name = staff must not import a sibling module's repository
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.staff
 forbidden_modules =
@@ -62,6 +70,7 @@ forbidden_modules =
 [importlinter:contract:alerts-no-cross-module-repository]
 name = alerts must not import a sibling module's repository
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.alerts
 forbidden_modules =
@@ -76,6 +85,7 @@ forbidden_modules =
 [importlinter:contract:reports-reads-only-via-services]
 name = reports must aggregate via sibling services, never sibling repositories
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.reports
 forbidden_modules =
@@ -93,6 +103,7 @@ forbidden_modules =
 [importlinter:contract:routes-never-import-repositories]
 name = routes must never import any repository (no layer skipping)
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.activities.routes
     app.programmes.routes
@@ -134,6 +145,7 @@ containers =
 [importlinter:contract:shared-is-infrastructure-only]
 name = app.shared must not depend on any business module
 type = forbidden
+allow_indirect_imports = True
 source_modules =
     app.shared
 forbidden_modules =

@@ -155,3 +155,138 @@ that would otherwise have surfaced mid-implementation — in particular that `ap
 own contract forbidding it from importing any business module. Nothing in the capstone brief lists
 that as a rule; it falls out of "shared must not become a sixth module" once you try to express it
 to a dependency analyser. The constraint is now enforced rather than aspirational.
+
+---
+
+## Phase 1 — StoreOps baseline (2026-08-31)
+
+### D-06 · `forbidden` contracts check DIRECT imports only
+
+**Decision.** Every `forbidden` contract in `.importlinter` sets `allow_indirect_imports = True`.
+
+**Alternatives considered.**
+1. Leave the default (transitive checking).
+2. Drop the `routes-never-import-repositories` contract and rely on the `layers` contract.
+3. Direct-only checking — chosen.
+
+**Rationale.** This was not a preference, it was a **bug fix found by running the gate**. With
+transitive checking, import-linter reported five violations that were all the *correct*
+architecture:
+
+```
+app.staff.routes is not allowed to import app.staff.repository:
+-   app.staff.routes -> app.staff.service (l.14)
+    app.staff.service -> app.staff.repository (l.13)
+```
+
+A route reaching a repository *through its service* is exactly the mandated layering, so the
+contract as originally written forbade the design it was meant to protect and the gate was
+unpassable. The same false positive hit `reports.service → programmes.service →
+programmes.repository`, which is the permitted cross-module read.
+
+PDF section 3.5 says "No module may import **directly** from another module's repository", so
+direct-only is also the faithful reading. Option 2 was rejected because the `layers` contract
+does *not* forbid a route importing a repository — in a layers contract a higher layer may
+import any lower layer, so `routes → repository` is permitted by construction. Only an explicit
+`forbidden` contract catches layer skipping.
+
+**Assumption it depends on.** That a developer cannot launder a boundary breach through an
+intermediary module — e.g. `activities.service → helper → alerts.repository` would now pass. The
+residual risk is accepted because the *direct* import is the realistic failure mode (it is what
+an LLM writes when it wants a sibling's data), and the laundering variant requires deliberately
+constructing a shim. `tests/test_architecture.py` adds a source-level AST check as a second net.
+
+### D-07 · Cross-module side effects are wired in `main.py`, not inside a module
+
+**Decision.** `app/main.py` is the composition root: it attaches the audit sink to the bus and
+registers the alerts subscriber. No business module wires another.
+
+**Alternatives considered.**
+1. `activities.service` calls `alerts_service` directly for the notification.
+2. Each module self-registers its subscribers on import.
+3. Explicit wiring in the composition root — chosen.
+
+**Rationale.** Option 1 *is* Failure Mode 4 and would break HG-1/HG-4. Option 2 is subtler and
+tempting: it keeps wiring next to the handler. But import-time side effects mean the
+subscription depends on whether a module has happened to be imported yet, which makes the
+cross-module behaviour dependent on import order — untestable in isolation and a genuinely
+nasty class of bug. Explicit wiring means the whole fan-out of the system is readable in one
+file, which is also what lets the Evaluator verify the event topology without tracing imports.
+
+**Assumption it depends on.** That the number of subscriptions stays small enough to enumerate
+by hand. Past roughly a dozen, a declarative registry that `main.py` iterates would be better;
+the current three-line body is not worth that machinery.
+
+### D-08 · `EventBus.subscribe` is idempotent
+
+**Decision.** Re-subscribing an already-registered handler is a silent no-op.
+
+**Alternatives considered.**
+1. Allow duplicates (standard pub/sub semantics).
+2. Raise on duplicate registration.
+3. Idempotent no-op — chosen.
+
+**Rationale.** The test suite builds an application per test via `create_app()`, and each build
+calls `wire_event_handlers()` against the process-wide bus. Under option 1 the twentieth test
+would fire twenty notifications per status change — and the symptom (an off-by-N side-effect
+count) is miles from the cause (factory wiring). Option 2 is defensible for a library but would
+make the application factory non-reentrant, which is a worse constraint than the one it removes.
+The guard works because Python bound methods compare equal when `__self__` and `__func__` match.
+
+**Assumption it depends on.** That no caller legitimately wants the same handler invoked twice
+per event. True here, and the property is asserted directly by
+`test_subscribe_is_idempotent_so_wiring_twice_does_not_double_side_effects` so the intent
+survives someone "simplifying" the guard away.
+
+### D-09 · `DONE` is terminal and same-status updates are rejected
+
+**Decision.** The transition table permits nothing out of `DONE`, and no status may transition
+to itself.
+
+**Alternatives considered.**
+1. Allow any transition; treat status as a free-form field.
+2. Allow reopening `DONE` (e.g. `DONE → IN_PROGRESS`).
+3. `DONE` terminal, self-transitions rejected — chosen.
+
+**Rationale.** Option 1 leaves the Evaluator with nothing to assess: with no rule there is no
+business rule for a test to verify, which quietly enables Failure Mode 3 (status-only
+assertions become the *only* thing a test could assert). A completed activity is an audit record
+of work done on a shift; reopening it rewrites history rather than recording a new problem, so
+option 2 was rejected in favour of raising a fresh activity. Rejecting self-transitions matters
+for the event contract specifically: a `TODO → TODO` update would publish an
+`ACTIVITY_STATUS_CHANGED` event whose `previousStatus` equals its `newStatus`, i.e. an audit
+entry describing no change.
+
+**Assumption it depends on.** That the Phase 5 bulk-status feature wants an invalid-transition
+path to exercise. It does — a request mixing a valid task with a `DONE` one is precisely the
+HTTP 207 partial-failure case, and this rule is what generates the per-item error.
+
+### D-10 · Endpoint inventory asserted from the OpenAPI schema, not `app.routes`
+
+**Decision.** Tests that assert which endpoints exist read `/openapi.json`.
+
+**Alternatives considered.**
+1. Walk `app.routes` and read `.path` / `.methods`.
+2. Maintain a hand-written list and review it by eye.
+3. Assert against the published OpenAPI document — chosen.
+
+**Rationale.** Option 1 was written first and **failed**: FastAPI 0.141 on Starlette 1.6 wraps
+each included router in an internal object exposing only `original_router` and
+`effective_route_contexts` — no `.path`, no `.methods`. So five of ten entries in `app.routes`
+were opaque, and a test walking that table silently saw only `/health`. Worse, it *looked* like
+an application bug when the routing itself was fine. The OpenAPI document is a public, versioned
+contract and is closer to what the assertion actually means: "what does this service publish?"
+
+**Assumption it depends on.** That every endpoint appears in the schema — false for a route with
+`include_in_schema=False`. Nothing in StoreOps uses that flag; if one ever did, the 9-endpoint
+test would under-count and needs revisiting.
+
+### Phase 1 insight
+
+Two of the three defects in this phase were found by the automated gate rather than by reading
+the code — the import-linter false positives (D-06) and the route-introspection breakage (D-10).
+Neither was visible by inspection, and both would have been invisible to an LLM Evaluator
+reasoning about the source without executing anything. That is the concrete argument for HG-7
+requiring *pasted command output* rather than an assertion that checks pass: the run is the
+evidence. It also means the Evaluator must never be allowed to "reason" its way to a gate
+verdict, which is now a stated rule for Phase 4.
