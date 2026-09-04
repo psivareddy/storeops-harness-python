@@ -290,3 +290,118 @@ reasoning about the source without executing anything. That is the concrete argu
 requiring *pasted command output* rather than an assertion that checks pass: the run is the
 evidence. It also means the Evaluator must never be allowed to "reason" its way to a gate
 verdict, which is now a stated rule for Phase 4.
+
+---
+
+## Phase 2 — Planner agent and shared-foundation skills (2026-09-04)
+
+### D-11 · Skill files named after the PDF's vocabulary, not the working document's
+
+**Decision.** The shared foundation is `app-context` + `architecture-principles`. The working
+document's proposed `storeops-boundaries` is not created.
+
+**Alternatives considered.**
+1. `storeops-boundaries`, as `capstone_best_prompt_combined.md` and the Phase 2 prompt both name it.
+2. Create both — `architecture-principles` for the rubric, `storeops-boundaries` as an alias.
+3. `app-context` + `architecture-principles` only — chosen.
+
+**Rationale.** PDF section 5.3 names the required files literally: *"Shared foundation (required
+for all agents): app-context, architecture-principles"*, and section 5.2's table names
+`how-to-review` for the Evaluator. Skill file quality is 8% of the working-harness score and a
+reviewer checks section 5.3 as a list; a file named `storeops-boundaries` forces them to infer the
+mapping. The working document is explicitly ranked below the PDF in `PROMPT.md`'s source-of-truth
+order, so this is not a judgement call — it is that order being applied. Option 2 was rejected
+because a duplicated rule set drifts: two files stating the module boundary rule means one of them
+is eventually wrong, and PDF section 11 is explicit that a great submission is one where *every
+file earns its place*.
+
+**Assumption it depends on.** That the grader checks section 5.3's named list rather than counting
+files. If they only count, the naming is neutral and this costs nothing — the decision is
+asymmetric in its favour.
+
+### D-12 · The Planner names tests but never writes them
+
+**Decision.** Each AC carries `<path>::<test_name>`. The Generator creates the test with that
+exact name.
+
+**Alternatives considered.**
+1. The Planner writes the test bodies, so the contract is executable.
+2. The Planner names no tests; the Generator chooses its own coverage.
+3. The Planner names tests, the Generator implements them — chosen.
+
+**Rationale.** Option 1 is tempting because a failing test is the most precise possible acceptance
+criterion. It breaks separation of duties in a specific way: the Generator would be graded against
+tests it did not have to satisfy honestly, and the fastest route to green becomes editing the
+Planner's test rather than the code. Option 2 leaves HG-3 unenforceable — with no named test, the
+Evaluator cannot distinguish "not tested" from "tested somewhere", which is exactly the ambiguity
+FM-3 hides in. Naming without implementing gives the Evaluator a mechanical check (does
+`test_partial_failure_returns_207_and_updates_only_valid_tasks` exist and pass?) while leaving the
+Generator responsible for the assertions inside it.
+
+**Assumption it depends on.** That the Generator cannot pass HG-3 with a named-but-hollow test —
+a function with the right name and a single `assert response.status_code == 207`. It cannot, but
+only because HG-3 requires the four assertions (state, error code, event count, audit count) as a
+separate check. If that check were relaxed, this decision would become a loophole. The two are
+coupled and must stay coupled.
+
+### D-13 · Contract exclusions are binding on the Evaluator, not just informative
+
+**Decision.** The contract's Exclusions block states what the sprint deliberately does not do, and
+`planner.agent.md` records that the Evaluator must **not** report those as gaps.
+
+**Alternatives considered.**
+1. Omit exclusions; let the Evaluator judge scope from the ACs.
+2. List exclusions as informational context.
+3. Make them binding — chosen.
+
+**Rationale.** An Evaluator that fails closed on ambiguity (the harness's stated posture) will
+treat absent functionality as a gap unless told otherwise. Without exclusions, "bulk update does
+not support reassignment" reads as incomplete work, producing a finding the Generator cannot fix —
+it would have to implement out-of-scope work to clear it. That is a mechanism for burning all three
+iterations on a scope dispute rather than a defect. Making exclusions binding converts a likely
+false-positive FAIL into a settled question, decided by the human at approval time, which is where
+scope decisions belong.
+
+**Assumption it depends on.** That the Planner's exclusions are honest rather than a way to
+pre-excuse weak work. The control is the approval checkpoint: the human reads the exclusions before
+writing `STATUS: APPROVED`, so an exclusion that guts the feature is visible precisely when it is
+cheapest to reject.
+
+### D-14 · Git runs through PowerShell; file writes run through Bash
+
+**Decision.** All git commands use the PowerShell tool. File authoring uses Bash heredocs or the
+Write tool.
+
+**Alternatives considered.**
+1. `git config --global --add safe.directory C:/Users/.../storeops-harness-python`, making Bash work.
+2. Use PowerShell for everything.
+3. Split by capability — chosen.
+
+**Rationale.** This corrects an error from Phase 0. I reported the dubious-ownership blocker as
+non-existent because `git status` worked; it worked *in PowerShell*, and I generalised from one
+shell to both. Re-verified in Phase 2: the same command in Bash fails with
+`fatal: detected dubious ownership`, and `git config --global --get-all safe.directory` confirms no
+exception exists for this repo. The sandboxed Bash tool runs under a restricted token — it also
+cannot write `/etc/*` — so ownership resolves differently there.
+
+Option 1 would work but mutates global git configuration on a machine that hosts other
+repositories, to fix a tool-routing problem that has a zero-config answer. Rejected as
+disproportionate.
+
+**Assumption it depends on.** That the PowerShell tool remains available for git. If a later phase
+runs in a bash-only context (CI, a container), option 1 becomes necessary — worth noting because
+`.github/workflows/ci.yml` in Phase 6 runs on Linux where this cannot arise.
+
+### Phase 2 insight
+
+Writing `architecture-principles` was the first point where the harness had to state a rule it
+could not fully enforce. `lint-imports` checks direct imports only (D-06), so a boundary breach
+laundered through an intermediary module passes. The temptation was to leave that unsaid — the
+contract report says "8 kept, 0 broken", which reads like total coverage.
+
+Stating the gap in the skill file instead has a second-order effect on Phase 4: the Evaluator now
+has a written obligation to *read the publish path* rather than treat a green `lint-imports` as
+proof of Rule 2 compliance. An honest statement of what a gate does not cover is what turns the
+Evaluator's LLM-assessed portion from duplicated effort into the part that actually adds
+detection. A skill file that overclaims its automation would have made the human review redundant
+in exactly the place it is most needed.

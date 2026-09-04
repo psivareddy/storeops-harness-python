@@ -1,8 +1,9 @@
 # CLAUDE.md — StoreOps Development Harness Orchestrator
 
-> **Status: Phase 0 skeleton.** Agent bodies and the evaluation framework are authored in
-> Phases 2–4 and referenced here. Sections marked _(Phase N)_ are placeholders whose contracts
-> are already binding — the agent files must conform to them, not the reverse.
+> **Status: Planner live (Phase 2 complete).** The Planner and the three shared-foundation skills
+> are authored; the Generator, Evaluator and Monitor are authored in Phases 3B–4. Sections still
+> marked _(Phase N)_ are placeholders whose contracts are **already binding** — the agent files
+> must conform to them, not the reverse.
 
 This repository contains two separable concerns. Do not mix them.
 
@@ -58,7 +59,7 @@ both produces and accepts an artefact provides no governance.
 
 | Agent | Definition file | Reads (skills) | Writes | Absolutely may not |
 |---|---|---|---|---|
-| **Planner** | `.harness/agents/planner.agent.md` _(Phase 2)_ | `app-context`, `architecture-principles`, `sprint-decomposition` | `.harness/output/spec.md`, `.harness/output/sprint-N-contract.md` | Write production code or tests |
+| **Planner** | [`planner.agent.md`](.harness/agents/planner.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md), [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`sprint-decomposition`](.harness/skills/sprint-decomposition/SKILL.md) | `.harness/output/spec.md`, `.harness/output/sprint-N-contract.md` | Write production code or tests; approve its own contract |
 | **Generator** | `.harness/agents/generator.agent.md` _(Phase 3B)_ | `app-context`, `architecture-principles`, `component-patterns`, `app-error-contract`, `event-bus-integration`, `how-to-test` | `app/**`, `tests/**`, `.harness/output/generator-summary.md` | Amend an approved AC; self-approve; issue a verdict |
 | **Evaluator** | `.harness/agents/evaluator.agent.md` _(Phase 4)_ | `architecture-principles`, `how-to-review`, `evaluation-criteria` | `.harness/output/evaluator-feedback.md` | Repair code or edit a test |
 | **Monitor** | `.harness/agents/monitor.agent.md` _(Phase 4)_ | `app-context` | `.harness/reviews/sprint-N-run-log.md` | Alter a verdict or reinterpret findings |
@@ -251,7 +252,7 @@ the harness look like pipeline configuration and invite it to be bypassed with a
 
 ## 8. StoreOps architecture rules (enforced, not advisory)
 
-Full detail in `.harness/skills/architecture-principles/SKILL.md` _(Phase 2)_.
+Full detail in [`architecture-principles/SKILL.md`](.harness/skills/architecture-principles/SKILL.md).
 
 | Rule | Constraint | Gate |
 |---|---|---|
