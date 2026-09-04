@@ -1,9 +1,9 @@
 # CLAUDE.md — StoreOps Development Harness Orchestrator
 
-> **Status: Planner and Generator live (Phase 3 complete).** Seven skill files and two agents are
-> authored; the Evaluator and Monitor are authored in Phase 4. Sections still marked _(Phase N)_
-> are placeholders whose contracts are **already binding** — the agent files must conform to them,
-> not the reverse.
+> **Status: all four agents live (Phase 4 complete).** Nine skill files and four agent
+> definitions are authored, and the evaluation framework is binding. Remaining _(Phase N)_ markers
+> refer to the demonstration run (Phase 5), deployment (Phase 6) and the narrative deliverables
+> (Phase 7).
 
 This repository contains two separable concerns. Do not mix them.
 
@@ -61,15 +61,16 @@ both produces and accepts an artefact provides no governance.
 |---|---|---|---|---|
 | **Planner** | [`planner.agent.md`](.harness/agents/planner.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md), [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`sprint-decomposition`](.harness/skills/sprint-decomposition/SKILL.md) | `.harness/output/spec.md`, `.harness/output/sprint-N-contract.md` | Write production code or tests; approve its own contract |
 | **Generator** | [`generator.agent.md`](.harness/agents/generator.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md), [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`component-patterns`](.harness/skills/component-patterns/SKILL.md), [`app-error-contract`](.harness/skills/app-error-contract/SKILL.md), [`event-bus-integration`](.harness/skills/event-bus-integration/SKILL.md), [`how-to-test`](.harness/skills/how-to-test/SKILL.md) | `app/**`, `tests/**`, `.harness/output/generator-summary.md` | Amend an approved AC; self-approve; issue a verdict; weaken a gate |
-| **Evaluator** | `.harness/agents/evaluator.agent.md` _(Phase 4)_ | `architecture-principles`, `how-to-review`, `evaluation-criteria` | `.harness/output/evaluator-feedback.md` | Repair code or edit a test |
-| **Monitor** | `.harness/agents/monitor.agent.md` _(Phase 4)_ | `app-context` | `.harness/reviews/sprint-N-run-log.md` | Alter a verdict or reinterpret findings |
+| **Evaluator** | [`evaluator.agent.md`](.harness/agents/evaluator.agent.md) | [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`how-to-review`](.harness/skills/how-to-review/SKILL.md), [`evaluation-criteria`](.harness/skills/evaluation-criteria/SKILL.md) | `.harness/output/evaluator-feedback.md` | Repair code or edit a test; score a failed-gate sprint; emit two verdicts |
+| **Monitor** | [`monitor.agent.md`](.harness/agents/monitor.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md) | `.harness/reviews/sprint-N-run-log.md` + archived chain of evidence | Alter a verdict; reinterpret or add findings; edit a prior entry; read `app/` |
 
 Skill files live in `.harness/skills/<name>/SKILL.md` and are **feedforward context**: an agent
 reads its declared skills *before* acting, not as a review checklist afterwards.
 
 ### Skill file inventory
 
-Seven authored, against PDF section 5.3's minimum of six. Every rule in every file cites a real
+Nine authored, against PDF section 5.3's minimum of six (which also requires at least two
+Evaluator-specific files — hence `how-to-review` **and** `evaluation-criteria`). Every rule in every file cites a real
 StoreOps module, symbol or path — a rule that would read identically for a generic REST API is a
 defect in that file.
 
@@ -82,8 +83,8 @@ defect in that file.
 | [`app-error-contract`](.harness/skills/app-error-contract/SKILL.md) | Generator | raising/extending `AppError`; prohibited raw-exception patterns | **FM-2** |
 | [`event-bus-integration`](.harness/skills/event-bus-integration/SKILL.md) | Generator | publish shape, audit subscription, subscriber wiring | **FM-4** |
 | [`how-to-test`](.harness/skills/how-to-test/SKILL.md) | Generator | the four required assertions; status-only rejected | **FM-3** |
-| `how-to-review` _(Phase 4)_ | Evaluator | gate order, evidence standard, ambiguity fallback | assessor leniency |
-| `evaluation-criteria` _(Phase 4)_ | Evaluator | HG-1…HG-8, weighted dimensions, verdict rules | all four |
+| [`how-to-review`](.harness/skills/how-to-review/SKILL.md) | Evaluator | review order, evidence standard, variable→binary conversion, the three automation blind spots | assessor leniency |
+| [`evaluation-criteria`](.harness/skills/evaluation-criteria/SKILL.md) | Evaluator | HG-1…HG-8, five weighted dimensions = 100%, verdict rules | **all four** |
 
 **Rules versus mechanics.** `architecture-principles` states *what the rule is and what breaks
 without it*, and is shared with the Planner and Evaluator. The four Generator skills state *how to
@@ -146,6 +147,40 @@ VERDICT: FAIL
 ```
 
 The orchestrator routes on that marker alone — never on prose, tone, or the numeric score.
+
+### The eight hard gates — failure-mode matrix
+
+Authoritative detail in
+[`evaluation-criteria/SKILL.md`](.harness/skills/evaluation-criteria/SKILL.md).
+
+| Gate | Check | → FM | Detection |
+|---|---|---|---|
+| **HG-1** | Zero direct imports of another module's `repository` | FM-1 | `lint-imports` (5 contracts) |
+| **HG-2** | Every failure is an `AppError` subclass; no raw exception escapes a service | FM-2 | `ruff` TRY/BLE + AST test + review |
+| **HG-3** | Tests assert state, `.code`, event count, audit count; coverage ≥ 80% | FM-3 | `pytest --cov` + review |
+| **HG-4** | Cross-module side effects published, never written directly or called | FM-4 | `lint-imports` + publish-path review |
+| **HG-5** | No `routes.py` imports a `repository`; no business rule in a route | FM-1, FM-4 | `lint-imports` + AST test |
+| **HG-6** | No write originates in `app/reports/` | FM-1, FM-4 | `lint-imports` + read-only tests |
+| **HG-7** | `mypy . && ruff check . && lint-imports && pytest --cov` exits 0 | all four | the command |
+| **HG-8** | Every approved AC has an accurate `file:line` **and** a named passing test | FM-3 | summary cross-checked against the repo |
+
+All four failure modes are gated: FM-1 by HG-1/5/6, FM-2 by HG-2, FM-3 by HG-3/8, FM-4 by HG-4/5/6.
+
+### The five weighted dimensions — total exactly 100%
+
+| # | Dimension | Weight | Gates | Automated check |
+|---|---|---:|---|---|
+| D1 | Architecture Compliance | **35%** | HG-1, HG-4, HG-5, HG-6 | `lint-imports` |
+| D2 | Test Quality & Business-Rule Coverage | **25%** | HG-3 | `pytest --cov`, `fail_under = 80` |
+| D3 | Error Contract Integrity | **15%** | HG-2 | `ruff` TRY/BLE + `mypy` |
+| D4 | Contract Fidelity | **15%** | HG-8 | named-test existence and pass |
+| D5 | Toolchain Cleanliness | **10%** | HG-7 | the full gate |
+| | **TOTAL** | **100%** | HG-1…HG-8 | ≥ 1 automated check per dimension |
+
+Each dimension is a fixed checklist of binary checks; its score is `passed / total × 100`, so the
+same check results always produce the same number. **Hard gates are evaluated before scoring, and
+once a gate fails no score is computed at all** — scoring a blocked sprint invites the reader to
+weigh a number against a blocker.
 
 | Verdict | Iteration | Action |
 |---|---|---|

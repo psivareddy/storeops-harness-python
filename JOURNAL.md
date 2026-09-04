@@ -512,3 +512,124 @@ The practical consequence is a rule now written into `how-to-test`: side-effect 
 `==` with an exact count, never `>=`. An implementation that publishes one event per *requested*
 id rather than per *successful* update passes `>= 1` and fails `== 2`. That single character is
 the difference between detecting FM-4 in the demonstration run and shipping it.
+
+---
+
+## Phase 4 — Evaluator, Monitor and the evaluation framework (2026-09-04)
+
+### D-18 · A failed hard gate suppresses the score entirely
+
+**Decision.** Once any of HG-1…HG-8 fails, the Evaluator emits `FAIL` and **computes no weighted
+score at all**. The document records `not computed — gate failed`.
+
+**Alternatives considered.**
+1. Always compute the score, and let the gate override it in the verdict.
+2. Compute it and record it alongside the failure, marked "informational".
+3. Do not compute it — chosen.
+
+**Rationale.** Options 1 and 2 are the same mistake at different volumes: they put a number next to
+a blocker and invite the reader to weigh them. A human reading "HG-1 FAILED / score 92" will
+reasonably wonder whether 92 is good enough, and that question should not be askable. The brief
+says a score can never override a gate; the cleanest enforcement is to make the comparison
+unavailable rather than merely disallowed.
+
+There is also a determinism argument. Scoring a broken sprint means scoring code whose architecture
+is known-invalid, where several checks are unanswerable — is check 1.5 "publish path correct" a
+pass when the publish path was replaced by a direct write? A number derived from unanswerable
+checks is worse than no number.
+
+**Assumption it depends on.** That the Monitor's trend table tolerates a missing score. It does —
+the field is itself the signal, and the gate-results row carries what the score would have. If a
+future analysis wants score-over-time across failed iterations, this decision blocks it; accepted,
+because gate-failure counts are the more useful trend.
+
+### D-19 · Dimension scores are derived from fixed binary checklists, not assigned by judgement
+
+**Decision.** Each dimension is a fixed list of binary checks (6/6/5/5/4 = 26 total).
+`dimension score = passed / total × 100`; the weighted score is the sum.
+
+**Alternatives considered.**
+1. The Evaluator assigns each dimension 0–100 by judgement against a description.
+2. Bands (excellent / adequate / poor) mapped to numbers.
+3. Fixed binary checklists with derived arithmetic — chosen.
+
+**Rationale.** The rubric requires verdict rules that "produce the same outcome given the same check
+results". Option 1 fails outright — the same code scores differently across runs because "how good
+is the test quality?" has no fixed answer. Option 2 only relocates the problem: the band boundaries
+become the judgement call, and an assessor under pressure drifts toward the generous band.
+
+Binary checks push the non-determinism down to the smallest unit, where it is most tractable: "does
+this test assert an audit count?" has one answer, verifiable by opening one file. Twenty-six such
+answers then determine the score arithmetically. The score stops being an opinion and becomes a
+derived value, which is the entire point of the instrument.
+
+**Assumption it depends on.** That the checklists are complete enough that a real defect fails at
+least one check. This is the assumption most likely to be wrong and it is not testable in advance —
+only the demonstration run will show whether a defect can pass all 26. If one does, the fix is a
+new check in the relevant dimension, not a return to judgement scoring.
+
+### D-20 · The Evaluator is denied the four Generator implementation skills
+
+**Decision.** The Evaluator reads `architecture-principles`, `how-to-review` and
+`evaluation-criteria` only — not `component-patterns`, `app-error-contract`,
+`event-bus-integration` or `how-to-test`.
+
+**Alternatives considered.**
+1. Give the Evaluator every skill file — more context, better review.
+2. Give it the Generator skills but not the Planner's.
+3. Rules and review method only — chosen.
+
+**Rationale.** This is D-15 applied to the Evaluator, and it is counter-intuitive enough to state
+plainly: withholding context here *improves* detection. If the Evaluator reads
+`component-patterns`, its check silently becomes "does this code match the template?" instead of
+"does this code obey the rule?" — and any defect the template itself contains becomes structurally
+invisible, because reference and artefact agree. The Evaluator's independence comes from assessing
+against the rule and its consequence, which is what `architecture-principles` supplies.
+
+It is also a cost argument: `component-patterns` and `how-to-test` together are ~600 lines the
+Evaluator would pay for every iteration to obtain a worse check.
+
+**Assumption it depends on.** That `architecture-principles` states every rule the Evaluator must
+enforce in consequence terms, without the mechanics. Already known to be imperfect — the
+validate→persist→publish ordering rule lives in `event-bus-integration` and appears in
+`architecture-principles` only as prose. `how-to-review` compensates by naming publish ordering as
+one of three explicit automation blind spots to check by hand. If the demonstration run shows
+ordering defects passing, the fix is to promote that rule into `architecture-principles` Rule 2 —
+not to hand over the templates.
+
+### D-21 · The Monitor never reads `app/`
+
+**Decision.** The Monitor's inputs are `evaluator-feedback.md`, `generator-summary.md`, the
+contract and prior run logs. It does not open application source at all.
+
+**Alternatives considered.**
+1. Let it read the diff so log entries are self-contained.
+2. Let it read `app/` to sanity-check the Evaluator's findings.
+3. Files-on-disk only, no source — chosen.
+
+**Rationale.** Option 2 creates a second, competing assessment: if the Monitor can check findings,
+it can disagree with them, and the archive stops being a record of what was decided and becomes an
+opinion about whether the decision was right. That destroys its evidential value — a reviewer
+auditing an acceptance decision needs to know what the Evaluator concluded, not what the Monitor
+made of it. The prohibition on reinterpreting findings only holds if the Monitor lacks the means to
+form its own view. Option 1 is milder with the same defect in miniature, and it would make the
+Monitor the most expensive agent in the loop rather than the cheapest.
+
+**Assumption it depends on.** That `evaluator-feedback.md` is complete enough to log from. Enforced
+by making every section of that schema mandatory — if the Evaluator omits findings, the Monitor
+records the omission rather than going to look for them.
+
+### Phase 4 insight
+
+The validation script written to check "weights sum to 100" caught something I was not looking for:
+`evaluation-criteria` documented all three verdicts in its rules table but only ever showed the
+literal string `VERDICT: PASS` in its emitting section. Since the orchestrator string-matches the
+marker, an Evaluator issuing a conditional pass had no exact spelling to copy — and the likely
+improvisations (`VERDICT: Conditional Pass`, `VERDICT: CONDITIONAL-PASS`) route nowhere, which
+would have surfaced as the loop silently stalling rather than as an error.
+
+The general lesson restates Phase 1's: a machine-readable contract needs a machine-checked
+assertion. Three of the four defects found in this build so far came from writing a check rather
+than re-reading the artefact — the import-linter false positives, the route-introspection
+breakage, and now a missing verdict literal in the very file whose job is removing ambiguity from
+the verdict. Phase 5's demonstration run should be treated as another such check, not a formality.
