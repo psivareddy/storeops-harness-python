@@ -8,12 +8,31 @@ event bus; this module imports no sibling module's repository.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
-from app.activities.models import Task, TaskCreate, TaskStatus, can_transition
+from app.activities.models import (
+    HANDOVER_TARGET_STATUSES,
+    BulkItemOutcome,
+    BulkStatusItemResult,
+    BulkStatusResult,
+    Task,
+    TaskCreate,
+    TaskStatus,
+    can_transition,
+    is_handover_target,
+)
 from app.activities.repository import TaskRepository, task_repository
-from app.shared.errors import InvalidStatusTransitionError, TaskNotFoundError
+from app.shared.errors import (
+    AppError,
+    InvalidStatusTransitionError,
+    TaskNotFoundError,
+    ValidationError,
+)
 from app.shared.events import EventBus, EventName, event_bus
 from app.shared.logging import get_logger
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Sequence
 
 logger = get_logger(__name__)
 
@@ -109,6 +128,77 @@ class ActivitiesService:
         )
         logger.info("Task %s moved %s -> %s", task_id, previous.value, requested.value)
         return updated
+
+
+    def bulk_update_status(
+        self, task_ids: Sequence[str], requested: TaskStatus
+    ) -> BulkStatusResult:
+        """Move many activities to ``requested``, isolating each item's failure.
+
+        Request-level rejections (an empty batch, a target outside
+        :data:`~app.activities.models.HANDOVER_TARGET_STATUSES`) raise before any write, so
+        nothing is persisted and no event is published.
+
+        Per item this delegates to :meth:`update_status`, which means each *successful* update
+        publishes exactly one ``ACTIVITY_STATUS_CHANGED`` event -- and therefore produces
+        exactly one audit entry, since ``AuditSink`` is subscribed to the bus. A failed item
+        never reaches the publish, so it produces neither. That counting invariant falls out of
+        reuse rather than being re-established here, where it could be re-broken.
+        """
+        if not task_ids:
+            raise ValidationError(
+                "A bulk status update requires at least one task id",
+                details={"taskIdCount": 0},
+            )
+        if not is_handover_target(requested):
+            permitted = sorted(status.value for status in HANDOVER_TARGET_STATUSES)
+            raise ValidationError(
+                f"Bulk status updates may only target {' or '.join(permitted)}; "
+                f"got {requested.value}",
+                details={"requestedStatus": requested.value, "permittedStatuses": permitted},
+            )
+
+        results: list[BulkStatusItemResult] = []
+        updated = 0
+        for task_id in task_ids:
+            try:
+                task = self.update_status(task_id, requested)
+            except AppError as exc:
+                # Permitted here only: a bulk aggregator in the service layer converting a
+                # per-item failure into a per-item result. Never in a route, and never wider
+                # than AppError -- a broad catch would swallow the defects the gate exists to
+                # find. exc.code is re-surfaced so the item keeps its specific code.
+                results.append(
+                    BulkStatusItemResult(
+                        task_id=task_id,
+                        outcome=BulkItemOutcome.FAILED,
+                        status=self._current_status(task_id),
+                        error=exc.to_payload(),
+                    )
+                )
+            else:
+                updated += 1
+                results.append(
+                    BulkStatusItemResult(
+                        task_id=task_id,
+                        outcome=BulkItemOutcome.UPDATED,
+                        status=task.status,
+                    )
+                )
+
+        failed = len(results) - updated
+        logger.info(
+            "Bulk handover to %s: %d updated, %d failed", requested.value, updated, failed
+        )
+        return BulkStatusResult(updated=updated, failed=failed, results=results)
+
+    def _current_status(self, task_id: str) -> TaskStatus | None:
+        """The task's status now, or ``None`` if it does not exist.
+
+        Used to report a failed item's unchanged state without raising a second time.
+        """
+        task = self._repository.get(task_id)
+        return task.status if task is not None else None
 
 
 activities_service = ActivitiesService()

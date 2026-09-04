@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -84,3 +85,60 @@ class TaskStatusUpdate(BaseModel):
     """Route-layer input schema for a single status change."""
 
     status: TaskStatus
+
+
+#: Statuses a shift handover may move an activity to. Handover records work as finished or
+#: stuck; reopening an activity to ``TODO``/``IN_PROGRESS`` is a different operation with a
+#: different authorisation question, so those targets are rejected before any write.
+HANDOVER_TARGET_STATUSES: frozenset[TaskStatus] = frozenset(
+    {TaskStatus.DONE, TaskStatus.BLOCKED}
+)
+
+
+def is_handover_target(requested: TaskStatus) -> bool:
+    """Whether ``requested`` is a status a bulk handover may set.
+
+    Lives beside :func:`can_transition` so both rules are applied by the service and by any
+    future event handler, rather than being restated at each call site.
+    """
+    return requested in HANDOVER_TARGET_STATUSES
+
+
+class BulkItemOutcome(StrEnum):
+    """Per-item outcome within a bulk handover response."""
+
+    UPDATED = "UPDATED"
+    FAILED = "FAILED"
+
+
+class BulkStatusUpdate(BaseModel):
+    """Route-layer input schema for a bulk handover status change.
+
+    ``task_ids`` carries no ``min_length``: the empty-batch rejection is a business rule raised
+    by the service, so it returns the StoreOps error envelope and stays assertable below HTTP.
+    A ``Field`` constraint would have FastAPI reject it first, with a different body shape.
+    """
+
+    task_ids: list[str]
+    status: TaskStatus
+
+
+class BulkStatusItemResult(BaseModel):
+    """The outcome of one activity within a bulk request."""
+
+    model_config = ConfigDict(frozen=True)
+
+    task_id: str = Field(serialization_alias="taskId")
+    outcome: BulkItemOutcome
+    status: TaskStatus | None = None
+    error: dict[str, Any] | None = None
+
+
+class BulkStatusResult(BaseModel):
+    """Aggregate outcome of a bulk handover request, in request order."""
+
+    model_config = ConfigDict(frozen=True)
+
+    updated: int
+    failed: int
+    results: list[BulkStatusItemResult]
