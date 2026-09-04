@@ -1,0 +1,56 @@
+# Keep the build context small and keep governance artefacts out of the image.
+#
+# This file is a security boundary as much as a speed optimisation: everything listed here is
+# either irrelevant to a running container or something that must not be shipped inside one.
+
+# --- Virtualenvs: host-built, wrong platform, and huge ---
+.venv/
+venv/
+
+# --- Bytecode and tooling caches ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# --- Tests: the gate runs in CI, not in the image ---
+tests/
+
+# --- The governance harness: not application code, and never shipped ---
+.harness/
+CLAUDE.md
+PROMPT.md
+DESIGN_BRIEF.md
+REFLECTION.md
+JOURNAL.md
+DEPLOYMENT.md
+
+# --- The capstone brief: third-party material, must never enter an image or registry ---
+*.pdf
+capstone_best_prompt_combined.md
+
+# --- VCS, CI and editor state ---
+.git/
+.gitignore
+.gitattributes
+.github/
+.vscode/
+.idea/
+
+# --- Container definitions themselves ---
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# --- Secrets: belt and braces. Nothing matching these is committed, but an image build runs
+#     against the working tree, which may hold a local .env the repository never sees. ---
+.env
+.env.*
+*.pem
+*.key

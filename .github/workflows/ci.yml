@@ -1,0 +1,157 @@
+# StoreOps CI — the trust boundary.
+#
+# This runs the SAME four commands the harness Evaluator runs for hard gate HG-7:
+#
+#     mypy . && ruff check . && lint-imports && pytest --cov
+#
+# The duplication is deliberate, not redundant. The harness gate runs on a developer's machine
+# before the commit, where feedback is cheap and reaches the Generator while context is live. CI
+# re-runs it on a clean checkout, so a passing local verdict cannot be taken on faith. On
+# disagreement CI is authoritative and the harness has an environment-dependence bug worth
+# recording in REFLECTION.md.
+#
+# This directory contains workflows ONLY. No agent definitions, no skill files, no run
+# artefacts — those live in .harness/. Mixing them would make the governance layer look like
+# pipeline configuration and invite it to be bypassed with a [skip ci].
+
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+# A new push to the same branch cancels the previous run: the older result is already stale.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Quality gate (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the floor declared in pyproject.toml, the version [tool.mypy] targets, and the
+        # version the Dockerfile ships — so it is the one that must stay green.
+        # 3.13 is the local development interpreter. Testing both is what stops a change that
+        # works on a developer's machine from breaking the shipped image, or vice versa.
+        python-version: ["3.11", "3.13"]
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install the project and its dev extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The four gate commands, run as separate steps rather than one chained line so the
+      # GitHub UI names which one failed. `&&` in a single step would report only "the gate
+      # failed" and force a log dive.
+
+      - name: mypy (strict typing — HG-7, and the automated half of HG-2)
+        run: mypy .
+
+      - name: ruff (style + TRY/BLE error-contract rules — HG-2)
+        run: ruff check .
+
+      - name: lint-imports (module boundaries and layering — HG-1, HG-4, HG-5, HG-6)
+        run: lint-imports
+
+      - name: pytest with coverage (business-rule tests, 80% floor — HG-3)
+        run: pytest --cov
+
+  harness-separation:
+    name: Harness/CI file separation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      # Enforces the separation CLAUDE.md section 6 requires and PDF section 8.2 scores. Without
+      # a check, "no harness files under .github/" is a convention that decays on the first
+      # convenient exception.
+      - name: Assert .github contains workflows only
+        run: |
+          set -euo pipefail
+          offenders=$(find .github -type f ! -path '.github/workflows/*' -print)
+          if [ -n "$offenders" ]; then
+            echo "::error::.github must contain workflows only. Found:"
+            echo "$offenders"
+            exit 1
+          fi
+          if find .github -type f \( -name '*.agent.md' -o -name 'SKILL.md' \) | grep -q .; then
+            echo "::error::Harness agent or skill files found under .github/"
+            exit 1
+          fi
+          echo "OK: .github contains workflows only."
+
+      - name: Assert the governance audit trail is committed
+        run: |
+          set -euo pipefail
+          if [ -z "$(git ls-files .harness/reviews/ | grep -v '\.gitkeep' || true)" ]; then
+            echo "::error::.harness/reviews/ holds no committed artefacts. PDF section 7 designates it the permanent audit trail."
+            exit 1
+          fi
+          echo "OK: audit trail present:"
+          git ls-files .harness/reviews/
+
+  container:
+    name: Image builds and serves /health
+    runs-on: ubuntu-latest
+    needs: gate
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: storeops:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The build succeeding proves very little; an image that starts and answers is the claim
+      # worth making. This is the same check the Dockerfile HEALTHCHECK performs, executed once
+      # from outside the container.
+      - name: Start the container and verify GET /health
+        run: |
+          set -euo pipefail
+          docker run -d --name storeops -p 8000:8000 storeops:ci
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://localhost:8000/health > /tmp/health.json; then
+              echo "Health probe succeeded on attempt ${attempt}:"
+              cat /tmp/health.json
+              echo
+              grep -q '"status":"ok"' /tmp/health.json
+              echo "Verifying the container runs as non-root:"
+              test "$(docker exec storeops id -u)" = "10001"
+              echo "OK: uid 10001"
+              docker rm -f storeops
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::/health did not respond within 40s"
+          docker logs storeops
+          docker rm -f storeops
+          exit 1
