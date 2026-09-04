@@ -1,9 +1,9 @@
 # CLAUDE.md — StoreOps Development Harness Orchestrator
 
-> **Status: Planner live (Phase 2 complete).** The Planner and the three shared-foundation skills
-> are authored; the Generator, Evaluator and Monitor are authored in Phases 3B–4. Sections still
-> marked _(Phase N)_ are placeholders whose contracts are **already binding** — the agent files
-> must conform to them, not the reverse.
+> **Status: Planner and Generator live (Phase 3 complete).** Seven skill files and two agents are
+> authored; the Evaluator and Monitor are authored in Phase 4. Sections still marked _(Phase N)_
+> are placeholders whose contracts are **already binding** — the agent files must conform to them,
+> not the reverse.
 
 This repository contains two separable concerns. Do not mix them.
 
@@ -60,12 +60,35 @@ both produces and accepts an artefact provides no governance.
 | Agent | Definition file | Reads (skills) | Writes | Absolutely may not |
 |---|---|---|---|---|
 | **Planner** | [`planner.agent.md`](.harness/agents/planner.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md), [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`sprint-decomposition`](.harness/skills/sprint-decomposition/SKILL.md) | `.harness/output/spec.md`, `.harness/output/sprint-N-contract.md` | Write production code or tests; approve its own contract |
-| **Generator** | `.harness/agents/generator.agent.md` _(Phase 3B)_ | `app-context`, `architecture-principles`, `component-patterns`, `app-error-contract`, `event-bus-integration`, `how-to-test` | `app/**`, `tests/**`, `.harness/output/generator-summary.md` | Amend an approved AC; self-approve; issue a verdict |
+| **Generator** | [`generator.agent.md`](.harness/agents/generator.agent.md) | [`app-context`](.harness/skills/app-context/SKILL.md), [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md), [`component-patterns`](.harness/skills/component-patterns/SKILL.md), [`app-error-contract`](.harness/skills/app-error-contract/SKILL.md), [`event-bus-integration`](.harness/skills/event-bus-integration/SKILL.md), [`how-to-test`](.harness/skills/how-to-test/SKILL.md) | `app/**`, `tests/**`, `.harness/output/generator-summary.md` | Amend an approved AC; self-approve; issue a verdict; weaken a gate |
 | **Evaluator** | `.harness/agents/evaluator.agent.md` _(Phase 4)_ | `architecture-principles`, `how-to-review`, `evaluation-criteria` | `.harness/output/evaluator-feedback.md` | Repair code or edit a test |
 | **Monitor** | `.harness/agents/monitor.agent.md` _(Phase 4)_ | `app-context` | `.harness/reviews/sprint-N-run-log.md` | Alter a verdict or reinterpret findings |
 
 Skill files live in `.harness/skills/<name>/SKILL.md` and are **feedforward context**: an agent
 reads its declared skills *before* acting, not as a review checklist afterwards.
+
+### Skill file inventory
+
+Seven authored, against PDF section 5.3's minimum of six. Every rule in every file cites a real
+StoreOps module, symbol or path — a rule that would read identically for a generic REST API is a
+defect in that file.
+
+| Skill | Read by | Governs | Prevents |
+|---|---|---|---|
+| [`app-context`](.harness/skills/app-context/SKILL.md) | all four | orientation: 5 modules, 9 endpoints, 3 events, seed fixtures | — (facts, not rules) |
+| [`architecture-principles`](.harness/skills/architecture-principles/SKILL.md) | Planner, Generator, Evaluator | the 5 rules, each with correct/rejected examples | **FM-1, FM-2, FM-4** |
+| [`sprint-decomposition`](.harness/skills/sprint-decomposition/SKILL.md) | Planner | sprint slicing, AC testability, AC→test mapping | **FM-3** (untestable ACs) |
+| [`component-patterns`](.harness/skills/component-patterns/SKILL.md) | Generator | the Routes→Service→Repository vertical slice, file by file | **FM-1** (layer skipping) |
+| [`app-error-contract`](.harness/skills/app-error-contract/SKILL.md) | Generator | raising/extending `AppError`; prohibited raw-exception patterns | **FM-2** |
+| [`event-bus-integration`](.harness/skills/event-bus-integration/SKILL.md) | Generator | publish shape, audit subscription, subscriber wiring | **FM-4** |
+| [`how-to-test`](.harness/skills/how-to-test/SKILL.md) | Generator | the four required assertions; status-only rejected | **FM-3** |
+| `how-to-review` _(Phase 4)_ | Evaluator | gate order, evidence standard, ambiguity fallback | assessor leniency |
+| `evaluation-criteria` _(Phase 4)_ | Evaluator | HG-1…HG-8, weighted dimensions, verdict rules | all four |
+
+**Rules versus mechanics.** `architecture-principles` states *what the rule is and what breaks
+without it*, and is shared with the Planner and Evaluator. The four Generator skills state *how to
+type the code that obeys it*. The split is deliberate: the Evaluator must not be handed
+implementation templates, or it would grade the code against a restatement of itself.
 
 ---
 

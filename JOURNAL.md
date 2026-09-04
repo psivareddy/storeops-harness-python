@@ -405,3 +405,110 @@ proof of Rule 2 compliance. An honest statement of what a gate does not cover is
 Evaluator's LLM-assessed portion from duplicated effort into the part that actually adds
 detection. A skill file that overclaims its automation would have made the human review redundant
 in exactly the place it is most needed.
+
+---
+
+## Phase 3 — Generator agent and implementation skills (2026-09-04)
+
+### D-15 · Rules and mechanics are separate skill files, not one merged file
+
+**Decision.** `architecture-principles` states the five rules and is read by Planner, Generator and
+Evaluator. Four further files — `component-patterns`, `app-error-contract`, `event-bus-integration`,
+`how-to-test` — state the implementation mechanics and are read by the Generator **only**.
+
+**Alternatives considered.**
+1. One large `architecture-principles` containing rules and code templates, read by all three.
+2. Four Generator files that restate the rules alongside the mechanics, dropping the shared file.
+3. Rules shared, mechanics Generator-only, with an explicit stated boundary at the top of each
+   file — chosen.
+
+**Rationale.** The decisive argument is what the Evaluator must *not* see. If the Evaluator reads
+implementation templates, it grades the code against a restatement of the code — the template
+becomes the specification, and any defect the template shares is invisible. Keeping the Evaluator on
+rules-and-consequences means it assesses whether the rule holds, not whether the shape matches.
+
+Option 1 also loses on cost: `architecture-principles` is loaded by three agents per iteration, so
+every line of Generator-only template would be paid three times to be useful once. Option 2 is the
+duplication trap already rejected in D-11 — two files stating the module boundary rule means one is
+eventually wrong, and PDF section 11 is explicit that a great submission is one where every file
+earns its place.
+
+Each of the four Generator files therefore opens with a stated boundary ("that file states the rule
+and why; this file is how you type the code that obeys it") so a reviewer can see the split is
+intentional rather than accidental overlap.
+
+**Assumption it depends on.** That the Evaluator can judge Rule 2 compliance from
+`architecture-principles` alone, without the publish-order detail in `event-bus-integration`. This
+is the weakest assumption in the phase — publish-before-persist is a real defect that
+`architecture-principles` describes only in prose. If the Phase 5 run shows the Evaluator missing
+ordering defects, the fix is to move the validate→persist→publish ordering rule *up* into
+`architecture-principles` Rule 2, not to hand the Evaluator the templates.
+
+### D-16 · One narrow exception to the raw-exception ban: bulk aggregators
+
+**Decision.** `except AppError` is permitted in a bulk aggregator **in the service layer** and
+nowhere else. Stated as an explicit exception in both `component-patterns` and
+`app-error-contract`.
+
+**Alternatives considered.**
+1. Ban `except AppError` outright; have the bulk method pre-validate every item before writing any.
+2. Have the bulk method inspect each item without calling the single-item service method.
+3. Permit the catch, narrowly scoped and documented — chosen.
+
+**Rationale.** Option 1 sounds cleaner and is worse. Pre-validating all items then writing all
+items means the validation logic exists twice — once as a predicate, once inside
+`update_status` — and the two drift. It also cannot express per-item failures that only surface at
+write time. Option 2 is the same duplication with extra steps, and it breaks the event-count
+invariant: an aggregator that does its own writing has to publish its own events, which is exactly
+where an N+1 defect appears.
+
+Option 3 keeps `update_status` as the single place the transition rule lives, so N successful items
+publish exactly N events with no additional code — the counting invariant falls out of reuse. The
+cost is one permitted catch, which is why it is named with its layer and its purpose rather than
+left as a judgement call.
+
+**Assumption it depends on.** That the exception stays narrow. It is written as "a bulk aggregator
+in the service layer, and nowhere else, and never in a route", and `ruff BLE001` still catches the
+broader `except Exception`. The residual risk is a Generator reading this as general licence to
+catch `AppError` in services; the Evaluator's HG-2 check must therefore treat any `except AppError`
+outside a bulk aggregator as a finding.
+
+### D-17 · The Generator declares its own test quality in the summary
+
+**Decision.** `generator-summary.md` includes a Tests-added table with per-test columns for
+*asserts state / error code / event count / audit count*.
+
+**Alternatives considered.**
+1. List tests added, without claims about what they assert.
+2. Have the Evaluator derive it by reading every test.
+3. Require the Generator to self-declare per assertion type — chosen.
+
+**Rationale.** HG-3 is the hardest gate to automate: `pytest --cov` proves a test *ran*, not that it
+*asserted anything meaningful*, and coverage is precisely the metric the original failure mode
+gamed. Option 2 works but makes the Evaluator's most expensive check also its least structured —
+it must reconstruct the claim before it can test it. A self-declaration turns the check into
+verification: the Evaluator reads a specific claim ("asserts audit count == 2") and confirms or
+refutes it at a named line, which is both cheaper and produces a sharper finding.
+
+The self-declaration is not trusted. It is an assertion the Evaluator falsifies, and a false `yes`
+is a more serious finding than an admitted `no` — which the agent file states outright, because an
+agent that believes honest gaps are punished will learn to hide them.
+
+**Assumption it depends on.** That the Evaluator actually spot-checks the table rather than reading
+it as evidence. If it does not, this decision makes things *worse* than option 2 by supplying a
+plausible-looking claim in place of a check. Phase 4's `how-to-review` must therefore require
+opening at least the tests behind any `yes` in the event-count and audit-count columns.
+
+### Phase 3 insight
+
+Writing `how-to-test` exposed that coverage and assertion quality are independent, and that only
+one of them is automatable. A status-only test executes the entire endpoint and reports ~100%
+coverage while asserting nothing — so the 80% floor in `pyproject.toml` and HG-3 are not two
+strengths of the same control, they are one automated check plus one irreducibly LLM-assessed
+check. Phase 4 must not let the green coverage number stand in for the assertion check, because
+the original client failure was a green suite that certified nothing.
+
+The practical consequence is a rule now written into `how-to-test`: side-effect assertions use
+`==` with an exact count, never `>=`. An implementation that publishes one event per *requested*
+id rather than per *successful* update passes `>= 1` and fails `== 2`. That single character is
+the difference between detecting FM-4 in the demonstration run and shipping it.
