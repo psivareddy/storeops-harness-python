@@ -1,9 +1,12 @@
 # CLAUDE.md — StoreOps Development Harness Orchestrator
 
-> **Status: all four agents live (Phase 4 complete).** Nine skill files and four agent
-> definitions are authored, and the evaluation framework is binding. Remaining _(Phase N)_ markers
-> refer to the demonstration run (Phase 5), deployment (Phase 6) and the narrative deliverables
-> (Phase 7).
+> **Status: build complete (Phases 0–7).** Ten skill files and four agent definitions are
+> authored; the evaluation framework is binding; the sprint-1 demonstration ran end-to-end to
+> `VERDICT: PASS`, archived at `.harness/reviews/`; deployment is documented in `DEPLOYMENT.md`;
+> and the narrative deliverables (`DESIGN_BRIEF.md`, `REFLECTION.md`, `PROMPT.md`,
+> `.harness/output/self-check.md`) are complete. Remaining _(Phase N)_ markers below are stale
+> references to individual artefacts that existed before Phase 6/7 filled them in — left in place
+> as a historical trace of build order, not as open work.
 
 This repository contains two separable concerns. Do not mix them.
 

@@ -44,16 +44,25 @@ The developer then reviews `.harness/output/sprint-N-contract.md` and sets its f
 
 ## 3. Demonstration feature prompt
 
-_Recorded verbatim in Phase 5A when the Planner is invoked. The feature below is the planned
-target; this section is updated with the exact prompt as issued._
-
-**Planned feature — shift handover bulk update:**
+**Final prompt, as actually issued to invoke the Planner (Phase 5A):**
 
 ```
-@planner Add shift handover bulk update — PATCH /api/activities/bulk-status allowing outgoing
-shift staff to mark multiple operational activities as DONE or BLOCKED in a single request, with
-partial-failure handling returning HTTP 207, one domain event published per successful update,
-and one audit entry written per updated task.
+Act as the Planner defined in .harness/agents/planner.agent.md.
+
+Feature: Shift handover bulk update — PATCH /api/activities/bulk-status marking multiple
+activities DONE or BLOCKED in one request, with partial-failure handling, one event per
+successful update, and one audit entry per updated task.
+
+Allowed scope: .harness/output/spec.md, .harness/output/sprint-1-contract.md
+Protected scope: app/**, tests/**, .harness/agents/**, .harness/skills/**
+
+Requirements: produce GIVEN/WHEN/THEN acceptance criteria covering the all-success path, the
+partial-failure path returning HTTP 207, the invalid-target-state path, and the guarantee that a
+failed item produces neither an event nor an audit entry. Map every AC to a named test.
+
+End the contract with the literal line: STATUS: AWAITING APPROVAL
+
+Write no production code. Stop after the contract.
 ```
 
 Chosen from capstone PDF section 3.4's suggested features because it exercises all five
@@ -76,18 +85,30 @@ The build was executed in eight phases. Each phase's prompt is recorded here as 
 | Phase | Objective | Status |
 |---|---|---|
 | 0 | Repository setup, toolchain, requirements register | complete |
-| 1 | StoreOps baseline (5 modules, 3 layers, AppError, event bus, audit sink) | pending |
-| 2 | Planner agent + shared foundation skills | pending |
-| 3A | Generator implementation skills | pending |
-| 3B | Generator agent | pending |
-| 4 | Evaluator, Monitor, evaluation framework | pending |
-| 5A–5C | End-to-end demonstration run (plan → approve → generate → evaluate) | pending |
-| 6 | Docker, CI, AWS deployment | pending |
-| 7 | Design Brief, Reflection, repository self-check | pending |
+| 1 | StoreOps baseline (5 modules, 3 layers, AppError, event bus, audit sink) | complete |
+| 2 | Planner agent + shared foundation skills | complete |
+| 3A | Generator implementation skills | complete |
+| 3B | Generator agent | complete |
+| 4 | Evaluator, Monitor, evaluation framework | complete |
+| 5A | Plan — Planner invoked, contract written, `STATUS: AWAITING APPROVAL` | complete |
+| 5B | Generate — refused twice at the approval checkpoint, then implemented the approved contract | complete |
+| 5C | Evaluate + Monitor — `VERDICT: PASS`, 8/8 gates, 100.00, archived to `.harness/reviews/` | complete |
+| 6 | Docker, CI, AWS deployment documentation | complete |
+| 7 | Design Brief, Reflection, repository self-check | complete |
 
 ---
 
 ## 5. Prompt evolution
 
-_Completed in Phase 7 (PDF section 6.3): how the invocation prompt changed across the build and
-what each change fixed._
+The invocation prompt changed twice across the build, both times before any code was written —
+which is itself evidence the approval checkpoint is doing its job: a scope defect surfaced by
+review, not by a failed gate.
+
+| Change | What triggered it | What it fixed |
+|---|---|---|
+| Endpoint path resolved to `/api/activities/bulk-status`, not a path under the existing `/api/tasks` prefix | The Planner noticed, before approval, that `app/activities/routes.py`'s existing router is `APIRouter(prefix="/api/tasks")`, which cannot host the PDF §3.4 path | Recorded as contract assumption A-1 (a second `APIRouter` in the same module) rather than left for the Generator to improvise mid-sprint |
+| Phase 5B's allowed scope widened to include `tests/test_main.py` | The endpoint inventory test (`EXPECTED_ENDPOINTS`) goes from 9 to 10 entries regardless of implementation choice, and the original scope excluded that file | Without the widening, the Generator would have had to choose between leaving the inventory test red (an automatic HG-7 FAIL) or writing outside its protected scope — a scope defect burning an iteration on a problem the contract review should have caught first |
+
+Both changes were made to the **prompt and the contract**, never to the harness's agent or skill
+files, and both were decided by a human before `STATUS: APPROVED` was written — consistent with
+`CLAUDE.md` §2's rule that only a human may change the approval line.

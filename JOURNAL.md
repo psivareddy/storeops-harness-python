@@ -633,3 +633,253 @@ assertion. Three of the four defects found in this build so far came from writin
 than re-reading the artefact — the import-linter false positives, the route-introspection
 breakage, and now a missing verdict literal in the very file whose job is removing ambiguity from
 the verdict. Phase 5's demonstration run should be treated as another such check, not a formality.
+
+---
+
+## Phase 5 — Demonstration run: plan, generate, evaluate (2026-09-04)
+
+### D-22 · The router-prefix conflict is recorded as a pre-approval contract assumption, not a mid-generation fix
+
+**Decision.** `app/activities/routes.py`'s existing router is `APIRouter(prefix="/api/tasks")`,
+which cannot host the PDF's literal path `/api/activities/bulk-status`. The fix — a second
+`APIRouter(prefix="/api/activities")` inside the same module, aggregated behind one exported
+`router` — is recorded as assumption A-1 in `sprint-1-contract.md`, decided and reviewed **before**
+`STATUS: APPROVED` was written.
+
+**Alternatives considered.**
+1. Leave the conflict for the Generator to resolve however it judged best, mid-sprint.
+2. Rename the existing prefix to `/api/activities`, breaking nine already-tested endpoints.
+3. Record it as a contract assumption for human review before approval — chosen.
+
+**Rationale.** Option 1 would have put an architectural choice — how many routers a module owns —
+behind an agent that `generator.agent.md` explicitly forbids from amending acceptance criteria.
+A router split is not an AC, but it is exactly the kind of judgment call that should be visible to
+the approving human rather than discovered by reading a diff after the fact. Recording it as A-1
+means the same information that would otherwise have appeared in a post-hoc code review appeared
+instead at the one point in the pipeline where a human is definitely reading.
+
+**Assumption it depends on.** That "two routers, one module" reads as a routing detail rather than
+a layering violation to whoever approves the contract. `sprint-1-contract.md` states this
+explicitly as A-1 rather than assuming silent agreement — DESIGN_BRIEF.md Section D records this as
+Decision 3, with the reviewer disagreement case named there.
+
+### D-23 · Phase 5B's allowed scope was widened before generation, not left narrow to manufacture a FAIL
+
+**Decision.** `tests/test_main.py` was added to the Generator's allowed scope before Phase 5B ran,
+because `EXPECTED_ENDPOINTS` goes from 9 to 10 entries regardless of implementation choice, and the
+file was originally excluded.
+
+**Alternatives considered.**
+1. Leave the scope narrow. The Generator would then face an unresolvable choice — leave the
+   inventory test red (an automatic HG-7 FAIL) or write outside its protected scope (a hard
+   prohibition in `generator.agent.md`) — manufacturing a FAIL iteration on a scope defect rather
+   than a code defect.
+2. Widen the scope before running — chosen.
+
+**Rationale.** A FAIL iteration is only informative evidence if it demonstrates something about the
+Generator's *output*. A FAIL caused by an allowed-scope gap the Planner should have caught during
+contract review demonstrates a defect in the *contract*, and recording it as if it were Generator
+evidence would misattribute the finding in the permanent audit trail. The honest checkpoint
+evidence — that the approval gate itself is real — came instead from the two refusals recorded
+below, which needed no manufactured defect.
+
+**Assumption it depends on.** That widening scope before the run, rather than after a FAIL, does
+not weaken the demonstration. It does not: the widening is disclosed in `PROMPT.md` §5 as a
+recorded prompt-evolution event, so the chain of evidence shows the decision was made and why,
+rather than hiding a scope correction inside a silent re-run.
+
+### D-24 · The approval precondition is last-line string equality, not a substring search
+
+**Decision.** `generator.agent.md`'s precondition check reads the **last line** of
+`sprint-1-contract.md` and requires it to equal `STATUS: APPROVED` exactly — not a
+`grep`-style containment check.
+
+**Alternatives considered.**
+1. Search the file for the substring `"STATUS: APPROVED"` anywhere in its text.
+2. Require exact equality on the final line only — chosen.
+
+**Rationale.** This was not designed in the abstract; it was forced by a real defect this run
+surfaced. `sprint-1-contract.md` line 11 contains explanatory prose that itself includes the
+string `STATUS: APPROVED` (describing what the developer will eventually write), so
+`grep -c "STATUS: APPROVED"` against the unapproved contract returns `1` — a Generator implementing
+the precondition as containment would have proceeded against a contract that was never approved.
+The two real approval-checkpoint events in `sprint-1-run-log.md` — a refusal against
+`STATUS: AWAITING APPROVAL`, then a refusal against the human typo `STATUS: AAPPROVED` — are the
+evidence the tighter check was exercised, not merely specified.
+
+**Assumption it depends on.** That the approval line is always the file's literal last line and
+never followed by trailing whitespace or a second line. `sprint-decomposition/SKILL.md`'s contract
+template enforces this by construction; a future contract template change would need to preserve
+it or restate the precondition.
+
+### Phase 5 insight
+
+The Monitor recorded a skill-file drift signal on the **first** occurrence of a pattern rather than
+waiting for the second occurrence `monitor.agent.md` §3 nominally requires. Three MINOR findings in
+the same sprint all named a skill file directly (`app-context` §3/`:72` had a stale endpoint count;
+`component-patterns` §6 and `how-to-test` §4 showed the wrong bulk-response shape). Waiting for a
+second sprint to confirm the pattern would mean shipping a known-stale `app-context` — read by all
+four agents, every iteration — to sprint 2 regardless. The more interesting finding, though, was
+what the instrument *couldn't* catch on its own: all three findings scored zero deduction, because
+none of the 26 binary checks in `evaluation-criteria` measure skill-file/contract consistency. The
+Evaluator's own proposed fix — a check that fails when a skill file references a symbol the diff
+renamed or removed — is recorded in `sprint-1-run-log.md` as a candidate, not yet built, because
+building it mid-demonstration would have erased the evidence that the gap exists. This is Phase 4's
+insight one level up: the validation script catches what the author wasn't looking for; the
+Evaluator, reviewing its own instrument's blind spot, did the same thing to itself.
+
+---
+
+## Phase 6 — Docker, CI, AWS deployment documentation (2026-09-04)
+
+### D-25 · `STOREOPS_ENV` caught by reading `config.py`, not by trusting the variable name already in use elsewhere
+
+**Decision.** The Dockerfile's runtime `ENV` line sets `STOREOPS_ENV=production`. The first draft
+read `STOREOPS_ENVIRONMENT=production`, and was corrected before commit.
+
+**Alternatives considered.**
+1. Trust the variable name as typed, since it read as a reasonable guess and nothing in the build
+   would have raised an error.
+2. Cross-reference `app/shared/config.py` directly before finalising the Dockerfile — chosen.
+
+**Rationale.** `os.getenv` returns its default on a name that doesn't match, so the mistyped
+variable would have produced **no error anywhere in the stack** — the container would build, the
+health check would pass, and every HTTP status code would still be correct. The only externally
+visible symptom is `/health` reporting `"environment": "local"` inside a production container,
+which nothing except reading the field back would catch. This is the same class of defect
+`aws-deployment/SKILL.md` §4 names as a verify-check requirement for exactly this reason: a status
+code proves the process started, not that its configuration is what was intended.
+
+**Assumption it depends on.** That `config.py:50` remains the single source of truth for the
+variable name. If a future refactor renames it again without updating the Dockerfile, `/health`'s
+`environment` field is the only signal that would surface the drift — which is why
+`DEPLOYMENT.md` §3 and `aws-deployment/SKILL.md` §4 both call out the exact line number rather than
+describing the variable generically.
+
+### D-26 · Docker unavailability was disclosed and substituted with real non-Docker evidence, not worked around silently
+
+**Decision.** `docker --version` failed on the build machine. Rather than skip verification or
+describe the build as complete, the Dockerfile's two riskiest assumptions were validated by other
+means: the packaging step (`pip install .` into a clean venv, then importing `app.main` from
+**outside the repository** to confirm `site-packages` resolution) and the running application
+(`uvicorn` serving `/health` and the sprint-1 endpoint live, with `STOREOPS_ENV=production` set).
+
+**Alternatives considered.**
+1. Report the Dockerfile as complete without running anything, since the file itself was correct
+   by inspection.
+2. Skip deployment evidence entirely and note it as blocked.
+3. Substitute genuine partial evidence for the specific things Docker would have proven, and label
+   the rest explicitly as designed-not-executed — chosen.
+
+**Rationale.** Option 1 is exactly the "fabricated green gate" `CLAUDE.md` §9 names as the single
+most damaging thing any agent in this harness can do — it would have converted a governance
+document into a rubber stamp for a claim nobody checked. Option 3 accepts a smaller, honestly
+labelled claim over a larger, unverifiable one: the packaging test doesn't prove the container
+builds, but it does prove the runtime stage's core assumption (only the venv needs to ship, no
+source tree) actually holds, which is independently useful and independently true regardless of
+whether Docker itself runs.
+
+**Assumption it depends on.** That CI's `container` job (`.github/workflows/ci.yml`) will exercise
+the real `docker build` on the next push and catch anything the substitute evidence missed. This is
+the same "harness precedes CI, CI is the trust boundary" reasoning `CLAUDE.md` §6 states for code —
+applied here to infrastructure for the first time.
+
+### D-27 · ECS Fargate over Elastic Beanstalk, with an attached-but-empty task role
+
+**Decision.** `DEPLOYMENT.md` §1 recommends ECS Fargate. The task role's policy is
+`{"Version": "2012-10-17", "Statement": []}` — attached to every task, granting nothing.
+
+**Alternatives considered.**
+1. Elastic Beanstalk, for its lower operational surface.
+2. ECS Fargate with no task role at all, since StoreOps calls no AWS API today.
+3. ECS Fargate with an attached, empty task role — chosen.
+
+**Rationale.** The deciding factor for Fargate over Beanstalk was the execution-role/task-role
+split and immutable task-definition revisions, which give `aws-deployment/SKILL.md` §5's rollback
+procedure a well-defined target (`$PREV_REV`) — Beanstalk's environment model makes "the exact
+previous set of bytes" a fuzzier concept. Between options 2 and 3: an omitted role is invisible in
+a future diff, while an attached-but-empty role means the day StoreOps needs, say, `s3:GetObject`,
+that grant shows up as a **change** to an existing, reviewable resource rather than as the
+first-ever appearance of a task role — the same reasoning already applied to `app/reports/` having
+no `add()` method rather than having write methods gated by a runtime check.
+
+**Assumption it depends on.** That "no AWS API calls today" remains true. `DEPLOYMENT.md` §5 states
+this as the explicit trigger condition: the first real permission need should be added to this
+same empty statement list, reviewed as a diff, not layered on top via a separate always-allow
+policy attached later.
+
+### Phase 6 insight
+
+Every defect found in Phase 6 was found by reading source rather than trusting a plan. The
+`STOREOPS_ENV` naming and the packaging validation both came from treating "the plan said so" as a
+draft to verify, not a fact to ship — consistent with the pattern named in Phase 3's insight
+(coverage and assertion quality are independent) and Phase 4's (a validation script catches what
+its author wasn't looking for). The new observation here is that this held even for **infra-only**
+work with no business logic in scope: the Dockerfile's ENV line is not "code" by any test HG-1
+through HG-8 would run, yet it carried the same class of silent-fallback defect FM-2 exists to
+prevent in application code. The deterministic gate has no hard gate for a Dockerfile; the only
+reason this was caught is that reading `config.py` before finalising the image was treated as
+mandatory rather than optional. If Phase 6 recurs on a future feature, `evaluation-criteria` should
+consider whether infrastructure files deserve a checklist item of their own, rather than relying on
+the same discipline being reapplied by memory each time.
+
+---
+
+## Phase 7 — Design Brief, Reflection, repository self-check (2026-09-04)
+
+### D-28 · The evaluation framework is reproduced verbatim in the Design Brief, not paraphrased
+
+**Decision.** `DESIGN_BRIEF.md` Section C copies the hard-gate table, the weighted-dimension
+table, the verdict-rule table, and the worked example directly from
+`.harness/skills/evaluation-criteria/SKILL.md`, rather than summarising them in the Brief's own
+words.
+
+**Alternatives considered.**
+1. Paraphrase the framework for readability, since a brief is meant to be read on its own.
+2. Reproduce it verbatim and cite the source file — chosen.
+
+**Rationale.** A paraphrase introduces a second copy of a document whose entire value is being the
+single deterministic source the Evaluator reads. Two copies drift — exactly the failure mode
+Phase 5's run log caught happening to `app-context` and `component-patterns` after a sprint changed
+the code under them. Verbatim reproduction with a citation means the Brief cannot go stale relative
+to the skill file without the mismatch being visible on inspection, rather than requiring a second
+maintenance pass every time the framework changes.
+
+**Assumption it depends on.** That `evaluation-criteria/SKILL.md` does not change after this Brief
+is written without the Brief being updated in the same commit. Nothing enforces this automatically;
+it is the same class of risk D-28 exists to reduce, one level up, and is recorded here rather than
+solved, since building an automated cross-check was judged out of scope for a documentation phase.
+
+### D-29 · The 90% rubric total is resolved by citation, not left `UNCONFIRMED`
+
+**Decision.** `.harness/output/self-check.md` §1 states the four required rubric rows total 90% by
+design and cites `AI_Native_Architect_Build.pdf` §8.1 verbatim as the source, rather than flagging
+the gap as an open question.
+
+**Alternatives considered.**
+1. Mark it `UNCONFIRMED` per the working document's original instruction, since the arithmetic
+   genuinely does not reach 100 without explanation.
+2. Resolve it against the attached PDF and cite the exact section — chosen.
+
+**Rationale.** The working document (`capstone_best_prompt_combined.md`) predates having the actual
+capstone PDF attached to this build, and instructs exactly the caution that document should carry
+when the authoritative source is unavailable. Once the PDF is available, that caution becomes a
+found fact, not a judgment call: §8.1 states outright that the four required components cap at 90%
+and `JOURNAL.md` is a named +10% bonus. Reporting `UNCONFIRMED` after reading the answer would be
+worse than useless — it would signal a real gap where none remains.
+
+**Assumption it depends on.** That this `JOURNAL.md` file continues to exist and continues to be
+updated. `.harness/output/self-check.md` records honestly that Phases 5–7 had no entry until this
+one, closing that specific gap the self-check itself flagged.
+
+### Phase 7 insight
+
+Writing `self-check.md` surfaced a small instance of the same pattern named across Phases 3, 4, and
+6: `CLAUDE.md`'s own status banner (line 3) still read "Phase 4 complete" with Phases 5–7 described
+as "remaining," which was stale the moment Phase 5 ran. Nobody was deceived by it — the actual
+run-log and reviews archive told the true story — but it is exactly the kind of drift
+`app-context`'s stale endpoint count demonstrated in Phase 5: a fact that is true when written and
+silently false a few phases later, sitting in the one file every reviewer opens first. It was
+corrected in this phase, but the more durable fix, not yet built, is the same one the Evaluator
+proposed in Phase 5 for skill files — a check that a status claim in a landing document still
+matches the state of the repository it describes.
